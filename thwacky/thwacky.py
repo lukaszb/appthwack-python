@@ -4,9 +4,6 @@
 
     thwacky is a python client for the AppThwack REST API.
 """
-__name__ = 'thwacky'
-__version__ = '0.0.1'
-__author__ = 'Andrew Hawker <andrew@appthwack.com>'
 
 try:
     import cStringIO as StringIO
@@ -27,7 +24,7 @@ def urlify(*resources, **params):
     :param resources: Tuple of resources which describe the endpoint.
     :param params: Mapping which builds url query string.
     """
-    url = '/'.join((DOMAIN,) + filter(None, resources))
+    url = '/'.join(filter(None, resources))
     qstring = urllib.urlencode(params)
     return '?'.join(filter(None, (url, qstring)))
 
@@ -83,8 +80,10 @@ class RequestsMixin(object):
     Mixin for adding basic REST client functionality.
     """
 
-    API_KEY = None
-    SESSION_DEFAULTS = {
+    api_key = None
+    domain = 'https://appthwack.com'
+    session = requests.Session()
+    session_defaults = {
         'verify': False,
     }
 
@@ -96,7 +95,9 @@ class RequestsMixin(object):
         :param resources: List of resources which build the URL we wish to use.
         :param kwargs: Mapping of options to use for this specific HTTP request.
         """
-        return requests.get(urlify('api', *resources), **self._session_config(**kwargs))
+        url = urlify(self.domain, 'api', *resources)
+        config = self._session_config(**kwargs)
+        return self.session.get(url, **config)
 
     @expects(200, 'application/json')
     def post(self, *resources, **kwargs):
@@ -106,13 +107,15 @@ class RequestsMixin(object):
         :param resources: List of resources which build the URL we wish to use.
         :param kwargs: Mapping of options to use for this specific HTTP request.
         """
-        return requests.post(urlify('api', *resources), **self._session_config(**kwargs))
+        url = urlify(self.domain, 'api', *resources)
+        config = self._session_config(**kwargs)
+        return self.session.post(url, **config)
 
     def _session_config(self, **kwargs):
         """
         Merge default, request specific and auth options to use in a HTTP request.
         """
-        return dict(self.SESSION_DEFAULTS, auth=(self.API_KEY, None), **kwargs)
+        return dict(self.session_defaults, auth=(self.api_key, None), **kwargs)
 
 
 class AppThwackApi(RequestsMixin):
@@ -122,11 +125,15 @@ class AppThwackApi(RequestsMixin):
     def __init__(self, api_key=None):
         """
         :param api_key: AppThwack account API key, default is 'APPTHWACK_API_KEY' environment variable.
+        :param domain: AppThwack server domain (testing), default is https://appthwack.com.
         """
         key = api_key or os.environ.get('APPTHWACK_API_KEY')
         if not key:
             raise ValueError('AppThwack API key must be provided.')
-        RequestsMixin.API_KEY = key #TODO (reconsider this) -- especially if/when stdlib support added
+
+        #TODO - refactor this when we support more than the requests lib
+        RequestsMixin.api_key = key
+
 
     def project(self, **kwargs):
         """
@@ -144,8 +151,8 @@ class AppThwackApi(RequestsMixin):
 
         .. endpoint:: [GET] /api/project
         """
-        data = self.get('project').json()
-        return [AppThwackProject(**p) for p in data]
+        res = self.get('project')
+        return [AppThwackProject(**p) for p in res.json()]
 
     def upload(self, path, name=None):
         """
@@ -164,8 +171,8 @@ class AppThwackApi(RequestsMixin):
         if not name:
             name = os.path.basename(root) + ext
         with open(path, 'r') as fileobj:
-            data = self.post('file', data={'name': name}, files={name: fileobj}).json()
-            return AppThwackFile(**data)
+            res = self.post('file', data={'name': name}, files={name: fileobj})
+            return AppThwackFile(**res.json())
 
 
 class AppThwackObject(object):
@@ -215,8 +222,8 @@ class AppThwackProject(AppThwackObject, RequestsMixin):
 
         .. endpoint:: [GET] /api/devicepool/<int:project_id>
         """
-        data = self.get('devicepools', self.id).json()
-        return [AppThwackDevicePool(**p) for p in data]
+        res = self.get('devicepools', self.id)
+        return [AppThwackDevicePool(**p) for p in res.json()]
 
     def run(self, name, app, **kwargs):
         """
@@ -230,8 +237,8 @@ class AppThwackProject(AppThwackObject, RequestsMixin):
         """
         req = dict(project=self.id, name=name, app=app)
         opt = dict((k,v) for (k,v) in ((k, kwargs.get(k)) for k in self.optional_args) if v)
-        data = self.post('run', data=dict(req, **opt)).json()
-        return AppThwackRun(self.id, **data)
+        res = self.post('run', data=dict(req, **opt))
+        return AppThwackRun(self.id, **res.json())
 
 
 class AppThwackAndroidProject(AppThwackProject):
@@ -271,7 +278,8 @@ class AppThwackRun(AppThwackObject, RequestsMixin):
 
         .. endpoint:: [GET] /api/run/<int:project_id>/<int:run_id>/status
         """
-        data = self.get(self.url, 'status').json()
+        res = self.get(self.url, 'status')
+        data = res.json()
         return data['status'] #TODO confirm structure
 
     def results(self):
